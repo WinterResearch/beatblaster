@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BeatBlaster Pro</title>
+    <script src="https://unpkg.com/tone"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #0f0f0f, #1f1f1f);
+            font-family: 'Arial', sans-serif;
+            color: #fff;
+            overflow: auto;
+            height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 5px 20px rgba(0, 255, 136, 0.3);
+        }
+        .title {
+            font-size: 3em;
+            color: #00ff88;
+            text-shadow: 0 0 15px #00ff88, 0 0 30px #00ccff;
+            margin: 0;
+        }
+        .track-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 4px 25px rgba(0, 0, 0, 0.5);
+        }
+        .track-grid {
+            display: grid;
+            grid-template-columns: repeat(32, 1fr);
+            gap: 4px;
+            margin-top: 10px;
+        }
+        .pad {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 6px;
+            background: linear-gradient(45deg, #333, #444);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid #00ff88;
+        }
+        .pad.active { background: linear-gradient(45deg, #00ff88, #00ccff); transform: scale(1.05); }
+        .pad:hover { opacity: 0.85; box-shadow: 0 0 10px #00ff88; }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 0 0 20px 20px;
+        }
+        button, select, input[type="range"] {
+            padding: 12px 25px;
+            background: linear-gradient(45deg, #00ff88, #00ccff);
+            border: none;
+            border-radius: 30px;
+            color: #1a1a1a;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover, select:hover, input[type="range"]:hover { transform: scale(1.05); box-shadow: 0 0 15px #00ff88; }
+        .visualizer {
+            height: 150px;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 15px;
+            margin: 20px 0;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.2);
+        }
+        canvas { width: 100%; height: 100%; }
+        .automation {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        h2 { color: #00ff88; text-shadow: 0 0 10px #00ff88; margin: 0 0 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">BeatBlaster Pro</h1>
+        </div>
+        <div class="track-section">
+            <h2>Drums</h2>
+            <div class="track-grid" id="drumPads"></div>
+        </div>
+        <div class="track-section">
+            <h2>Melody</h2>
+            <div class="track-grid" id="melodyPads"></div>
+        </div>
+        <div class="track-section">
+            <h2>Bass</h2>
+            <div class="track-grid" id="bassPads"></div>
+        </div>
+        <div class="track-section">
+            <h2>Overlay Loop</h2>
+            <div class="track-grid" id="loopPads"></div>
+        </div>
+        <div class="visualizer"><canvas id="visualizer"></canvas></div>
+        <div class="controls">
+            <button onclick="toggleLoop()">Play/Stop</button>
+            <button onclick="clear()">Clear</button>
+            <button onclick="randomize()">Randomize</button>
+            <button onclick="exportAudio()">Export WAV</button>
+            <select onchange="changeBPM(this.value)">
+                <option value="80">80 BPM</option>
+                <option value="100">100 BPM</option>
+                <option value="120" selected>120 BPM</option>
+                <option value="140">140 BPM</option>
+                <option value="160">160 BPM</option>
+            </select>
+            <select onchange="changeEffect(this.value)">
+                <option value="none">No Effect</option>
+                <option value="reverb">Reverb</option>
+                <option value="distortion">Distortion</option>
+                <option value="delay">Delay</option>
+            </select>
+            <div class="automation">
+                <label>Volume</label>
+                <input type="range" min="0" max="1" step="0.01" value="0.7" oninput="changeVolume(this.value)">
+            </div>
+            <div class="automation">
+                <label>Filter</label>
+                <input type="range" min="100" max="5000" value="1000" oninput="changeFilter(this.value)">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tracks = {
+            drum: { pads: [], synth: new Tone.MembraneSynth(), notes: ['C2', 'D2', 'F2', 'G2'] },
+            melody: { pads: [], synth: new Tone.PolySynth(Tone.Synth), notes: ['C4', 'D4', 'E4', 'G4', 'A4', 'B4', 'C5', 'D5'] },
+            bass: { pads: [], synth: new Tone.DuoSynth(), notes: ['C2', 'D2', 'E2', 'G2', 'A2', 'B2', 'C3', 'D3'] },
+            loop: { pads: [], synth: new Tone.Sampler({ urls: { "C4": "https://tonejs.github.io/audio/loop/loop.mp3" } }), notes: ['C4'] }
+        };
+        let isPlaying = false;
+        const effects = {
+            reverb: new Tone.Reverb(2),
+            distortion: new Tone.Distortion(0.5),
+            delay: new Tone.FeedbackDelay("8n", 0.5)
+        };
+        const filter = new Tone.Filter(1000, "lowpass");
+        const mixer = new Tone.Gain(0.7);
+        let currentEffect = null;
+
+        // Chain audio
+        Object.values(tracks).forEach(t => t.synth.chain(filter, mixer, Tone.Destination));
+
+        // Initialize 32-step grids
+        Object.keys(tracks).forEach(track => {
+            const grid = document.getElementById(`${track}Pads`);
+            for (let i = 0; i < 32; i++) {
+                const pad = document.createElement('div');
+                pad.className = 'pad';
+                pad.onclick = () => togglePad(tracks[track], i);
+                tracks[track].pads.push({ element: pad, active: false });
+                grid.appendChild(pad);
+            }
+        });
+
+        function togglePad(track, index) {
+            track.pads[index].active = !track.pads[index].active;
+            track.pads[index].element.classList.toggle('active');
+            if (track.pads[index].active) {
+                track.synth.triggerAttackRelease(track.notes[index % track.notes.length], '8n');
+            }
+        }
+
+        const loop = new Tone.Loop(time => {
+            Object.values(tracks).forEach(track => {
+                track.pads.forEach((pad, i) => {
+                    if (pad.active) {
+                        track.synth.triggerAttackRelease(track.notes[i % track.notes.length], '8n', time);
+                    }
+                });
+            });
+        }, '32n');
+
+        function toggleLoop() {
+            if (isPlaying) {
+                loop.stop();
+                Tone.Transport.stop();
+            } else {
+                Tone.Transport.start();
+                loop.start(0);
+            }
+            isPlaying = !isPlaying;
+        }
+
+        function clear() {
+            Object.values(tracks).forEach(track => track.pads.forEach(pad => {
+                pad.active = false;
+                pad.element.classList.remove('active');
+            }));
+        }
+
+        function randomize() {
+            clear();
+            Object.values(tracks).forEach(track => {
+                track.pads.forEach((pad, i) => {
+                    if (Math.random() > (track === tracks.loop ? 0.9 : 0.7)) togglePad(track, i);
+                });
+            });
+        }
+
+        function changeBPM(bpm) { Tone.Transport.bpm.value = bpm; }
+        function changeVolume(vol) { mixer.gain.value = vol; }
+        function changeFilter(freq) { filter.frequency.value = freq; }
+
+        function changeEffect(effect) {
+            if (currentEffect) Object.values(tracks).forEach(t => t.synth.disconnect(effects[currentEffect]));
+            currentEffect = effect === 'none' ? null : effect;
+            if (currentEffect) Object.values(tracks).forEach(t => t.synth.chain(effects[currentEffect], filter, mixer, Tone.Destination));
+            else Object.values(tracks).forEach(t => t.synth.chain(filter, mixer, Tone.Destination));
+        }
+
+        async function exportAudio() {
+            const recorder = new Tone.Recorder();
+            mixer.connect(recorder);
+            await recorder.start();
+            toggleLoop();
+            await new Promise(resolve => setTimeout(resolve, 4000));
+            toggleLoop();
+            const recording = await recorder.stop();
+            const url = URL.createObjectURL(recording);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'beatblaster_track.wav';
+            a.click();
+        }
+
+        // Visualizer
+        const analyser = new Tone.Analyser('waveform', 2048);
+        mixer.connect(analyser);
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        function draw() {
+            requestAnimationFrame(draw);
+            const data = analyser.getValue();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < data.length; i++) {
+                const x = (i / data.length) * canvas.width;
+                const y = (1 - data[i]) * canvas.height / 2;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+        draw();
+
+        document.addEventListener('click', async () => await Tone.start(), { once: true });
+    </script>
+</body>
+</html>
